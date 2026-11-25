@@ -391,6 +391,9 @@ class FakeScanner:
         self.started = False
         self.stopped = False
         self.finished = False
+        self.detected = False
+        self.points = []
+        self.frame_directory = "/dev/shm/test"
         self._outcome = (None, None, False)
         FakeScanner.instances.append(self)
 
@@ -416,9 +419,9 @@ class CameraTest(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
 
         FakeScanner.instances = []
-        self.real_scanner = protocol.camera.Scanner
-        protocol.camera.Scanner = FakeScanner
-        self.addCleanup(lambda: setattr(protocol.camera, "Scanner", self.real_scanner))
+        self.real_scanner = protocol.camera.FrameScanner
+        protocol.camera.FrameScanner = FakeScanner
+        self.addCleanup(lambda: setattr(protocol.camera, "FrameScanner", self.real_scanner))
 
         self.session = protocol.Session(self.vault)
         protocol._run(self.session, {"cmd": "unlock", "passphrase": PASSPHRASE})
@@ -441,6 +444,8 @@ class CameraTest(unittest.TestCase):
 
         pending = self.run_command(cmd="cameraStatus")
         self.assertEqual((pending["scanning"], pending["done"]), (True, False))
+        self.scanner().detected = True
+        self.assertTrue(self.run_command(cmd="cameraStatus")["detected"])
 
         link = _migration_link([("GitHub", "yogesh", b"\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a", 1, 1, 2, 0)])
         self.scanner().resolve(payloads=[link])

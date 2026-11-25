@@ -74,6 +74,10 @@ Item {
     send({ cmd: "cameraStart" }, callback)
   }
 
+  function cameraFrame(name) {
+    send({ cmd: "cameraFrame", name: name })
+  }
+
   function cameraStatus(callback) {
     send({ cmd: "cameraStatus" }, callback)
   }

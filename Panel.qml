@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -14,7 +15,11 @@ Panel {
 
   property bool settingsOpen: false
   property bool passphraseFormOpen: false
+  property bool importOpen: false
   property bool cameraScanning: false
+  property bool cameraDetected: false
+  property string cameraDirectory: ""
+  property var cameraPoints: []
   property string filter: ""
   property int cursor: 0
   property string notice: ""
@@ -55,6 +60,7 @@ Panel {
     if (vault.vaultState === Model.VAULT_LOCKED) return "unlock"
     if (cameraScanning) return "camera"
     if (settingsOpen) return "settings"
+    if (importOpen) return "empty"
     return accounts.length > 0 ? "list" : "empty"
   }
 
@@ -120,6 +126,7 @@ Panel {
   }
 
   function announceImport(response) {
+    if (Model.number(response.added) > 0) importOpen = false
     setNotice(Model.importSummary(response), Model.number(response.added) === 0)
   }
 
@@ -139,11 +146,15 @@ Panel {
 
   function startCamera() {
     clearNotice()
+    cameraDetected = false
+    cameraPoints = []
     vault.cameraStart(function(response) {
       if (!response.ok) {
         root.setNotice(Model.errorText(response), true)
         return
       }
+      if (!root.opened || !root.vaultUnlocked) { vault.cameraStop(); return }
+      root.cameraDirectory = response.frameDirectory
       root.cameraScanning = true
       cameraPoll.restart()
     })
@@ -211,6 +222,7 @@ Panel {
   }
 
   function lockNow() {
+    stopCamera()
     settingsOpen = false
     setFilter("")
     vault.lock()
@@ -250,6 +262,7 @@ Panel {
       if (cameraScanning) stopCamera()
       else if (passphraseFormOpen) passphraseFormOpen = false
       else if (settingsOpen) settingsOpen = false
+      else if (importOpen) importOpen = false
       else if (filter) setFilter("")
       else close()
       event.accepted = true
@@ -266,7 +279,7 @@ Panel {
     if (event.modifiers & Qt.ControlModifier) {
       if (vaultUnlocked && event.key === Qt.Key_L) { lockNow(); event.accepted = true; return }
       if (vaultUnlocked && event.key === Qt.Key_S) { settingsOpen = !settingsOpen; event.accepted = true; return }
-      if (vaultUnlocked && event.key === Qt.Key_I) { scanRegion(); event.accepted = true; return }
+      if (vaultUnlocked && event.key === Qt.Key_I) { settingsOpen = false; importOpen = true; event.accepted = true; return }
       if (vaultUnlocked && event.key === Qt.Key_W) { startCamera(); event.accepted = true; return }
     }
 
@@ -300,6 +313,7 @@ Panel {
 
   onOpenedChanged: {
     stopCamera()
+    importOpen = false
     setFilter("")
     settingsOpen = false
     passphraseFormOpen = false
@@ -342,6 +356,8 @@ Panel {
         root.setNotice(Model.errorText(response), true)
         return
       }
+      root.cameraDetected = !!response.detected
+      root.cameraPoints = response.points || []
       if (response.done) root.finishCamera(response)
     })
   }
@@ -368,7 +384,7 @@ Panel {
     open: root.opened
     focusTarget: root.focusField || keys
     centerOnBar: false
-    contentWidth: panel.fittedContentWidth(Style.space(400))
+    contentWidth: panel.fittedContentWidth(Style.space(root.cameraScanning ? 480 : 400))
     contentHeight: panel.fittedContentHeight(body.implicitHeight, Style.space(620))
 
     Item {
@@ -453,6 +469,7 @@ Panel {
           width: parent.width
           visible: root.notice !== ""
           text: root.notice
+          textFormat: Text.PlainText
           color: root.noticeIsError ? root.urgent : root.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -675,7 +692,7 @@ Panel {
 
       Text {
         width: parent.width
-        text: "^I scan  ^W camera  ↵ import pasted  ^S settings  ^L lock"
+        text: "^I import  ^W camera  ↵ import pasted  ^S settings  ^L lock"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -688,56 +705,108 @@ Panel {
     id: cameraView
 
     Column {
-      spacing: Style.spacing.lg
+      id: cameraContent
+      width: parent.width
+      spacing: Style.spacing.md
+      property int frameNumber: 0
+      property bool capturePending: false
 
-      Item {
-        width: parent.width
-        height: Style.space(84)
-
-        Item {
-          id: scanMark
-          width: Style.space(64)
-          height: width
-          anchors.centerIn: parent
-
-          CodeRing {
-            anchors.fill: parent
-            progress: 0.3
-            ringColor: root.accent
-            trackColor: Util.alpha(root.foreground, 0.12)
-
-            RotationAnimation on rotation {
-              from: 0
-              to: 360
-              duration: 1400
-              loops: Animation.Infinite
-              running: root.cameraScanning
+      MediaDevices { id: devices }
+      Camera {
+        id: cameraDevice
+        cameraDevice: devices.defaultVideoInput
+        active: root.cameraScanning
+        Component.onCompleted: {
+          let formats = cameraDevice.cameraDevice.videoFormats
+          let best = null
+          for (let i = 0; i < formats.length; ++i) {
+            let f = formats[i]
+            if (f.resolution.width === 1280 && f.resolution.height === 720 && f.maxFrameRate >= 30) {
+              best = f
+              break
             }
           }
-
-          Text {
-            anchors.centerIn: parent
-            text: "\uf030"
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.heading
-          }
+          if (best) cameraFormat = best
+        }
+        onErrorOccurred: function(error, message) {
+          root.stopCamera()
+          root.setNotice("Camera: " + message, true)
+        }
+      }
+      CaptureSession { camera: cameraDevice; videoOutput: video; imageCapture: capture }
+      ImageCapture {
+        id: capture
+        quality: ImageCapture.VeryHighQuality
+        onImageSaved: function(id, fileName) {
+          cameraContent.capturePending = false
+          if (root.cameraScanning) vault.cameraFrame(String(fileName).split("/").pop())
+        }
+        onErrorOccurred: function(id, error, message) {
+          cameraContent.capturePending = false
+          root.stopCamera()
+          root.setNotice("Camera capture: " + message, true)
+        }
+      }
+      Timer {
+        interval: 350
+        repeat: true
+        running: root.cameraScanning && !root.cameraDetected
+        onTriggered: {
+          if (!capture.readyForCapture || cameraContent.capturePending) return
+          cameraContent.capturePending = true
+          cameraContent.frameNumber++
+          capture.captureToFile(root.cameraDirectory + "/frame-" + cameraContent.frameNumber + ".jpg")
         }
       }
 
+      Rectangle {
+        width: parent.width
+        height: width * 9 / 16
+        color: "black"
+        clip: true
+        VideoOutput { id: video; anchors.fill: parent; fillMode: VideoOutput.PreserveAspectFit }
+        Canvas {
+          id: outline
+          anchors.fill: parent
+          onPaint: {
+            let ctx = getContext("2d")
+            ctx.reset()
+            let points = root.cameraPoints
+            if (!root.cameraDetected || points.length !== 4) return
+            let rect = video.contentRect
+            let resolution = cameraDevice.cameraFormat.resolution
+            let fw = resolution.width || 1280
+            let fh = resolution.height || 720
+            ctx.strokeStyle = "#38f87a"
+            ctx.lineWidth = 3
+            ctx.beginPath()
+            for (let i = 0; i < 4; ++i) {
+              let x = rect.x + points[i][0] * rect.width / fw
+              let y = rect.y + points[i][1] * rect.height / fh
+              if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+            }
+            ctx.closePath()
+            ctx.stroke()
+          }
+          Connections { target: root; function onCameraPointsChanged() { outline.requestPaint() } }
+        }
+      }
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: "Hold the export QR up to your camera"
-        color: root.foreground
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+        text: root.cameraDetected ? "QR detected — importing…" : "Align the QR in the camera. Scanning stops after 45 seconds."
+        color: root.cameraDetected ? root.accent : root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
       }
-
       Text {
         width: parent.width
         horizontalAlignment: Text.AlignHCenter
-        text: "Esc to stop"
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+        text: "Press Esc to stop"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -817,6 +886,16 @@ Panel {
       }
 
       PanelSeparator { foreground: root.foreground }
+
+      Button {
+        text: "Import accounts"
+        iconText: "\uf055"
+        foreground: root.foreground
+        accent: root.accent
+        fontFamily: root.fontFamily
+        bordered: true
+        onClicked: { root.settingsOpen = false; root.importOpen = true }
+      }
 
       Text {
         width: parent.width

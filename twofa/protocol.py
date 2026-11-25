@@ -107,10 +107,17 @@ class Session:
             self._require_unlocked()
             if self._camera is not None and not self._camera.finished:
                 raise SessionError("busy", "a camera scan is already running")
-            scanner = camera.Scanner(request.get("device"), request.get("timeout"))
+            scanner = camera.FrameScanner(request.get("device"), request.get("timeout"))
             scanner.start()
             self._camera = scanner
-            return {"scanning": True}
+            return {"scanning": True, "frameDirectory": scanner.frame_directory}
+
+    def camera_frame(self, request):
+        with self._guard:
+            self._require_unlocked()
+            if self._camera is not None:
+                self._camera.submit(str(request.get("name") or ""))
+            return {}
 
     # Reports ok with a done flag even when nothing was found.
     def camera_status(self, _request=None):
@@ -119,7 +126,7 @@ class Session:
             if scanner is None:
                 return {"scanning": False, "done": False}
             if not scanner.finished:
-                return {"scanning": True, "done": False}
+                return {"scanning": True, "done": False, "detected": scanner.detected, "points": scanner.points}
 
             self._camera = None
             payloads, message, cancelled = scanner.outcome()
@@ -255,6 +262,7 @@ COMMANDS = {
     "remove": Session.remove,
     "cameraStart": Session.camera_start,
     "cameraStatus": Session.camera_status,
+    "cameraFrame": Session.camera_frame,
     "cameraStop": Session.camera_stop,
     "setAutoLock": Session.set_auto_lock,
     "setPassphrase": Session.set_passphrase,

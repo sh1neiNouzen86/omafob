@@ -23,7 +23,7 @@ omarchy plugin add https://github.com/yogeshojha/omafob.git --enable
 ```
 
 ```bash
-sudo pacman -S --needed gnupg wl-clipboard zbar grim slurp
+sudo pacman -S --needed gnupg wl-clipboard zbar grim slurp qt6-multimedia zxing-cpp
 ```
 
 Keybind, in `~/.config/hypr/bindings.conf`:
@@ -38,7 +38,7 @@ Google Authenticator: `⋮` → Transfer accounts → Export accounts. One QR ho
 every account you pick.
 
 - **Camera**: `Ctrl+W`, hold the phone up to the webcam.
-- **Screen**: `Ctrl+I`, drag a box over the QR.
+- **Screen**: `Ctrl+I`, choose **Scan the screen**, and drag a box over the QR.
 - **Paste**: an `otpauth://` link, or a path to a QR image.
 
 Re-importing the same export is safe. Accounts already stored are skipped.
@@ -52,7 +52,7 @@ Re-importing the same export is safe. Accounts already stored are skipped.
 | `↑` `↓` | move |
 | `Backspace` / `Ctrl+U` | edit or clear the filter |
 | `Del` | remove an account |
-| `Ctrl+I` | scan the screen |
+| `Ctrl+I` | open import options |
 | `Ctrl+W` | scan from the camera |
 | `Ctrl+S` | settings |
 | `Ctrl+L` | lock |
@@ -84,8 +84,10 @@ still copies. For screen sharing and open offices.
 - The passphrase reaches gpg on its own fd, never `argv`. `--no-symkey-cache`.
 - The helper holds the secrets. The shell receives codes and expiry times.
 - Copies use `wl-copy --sensitive`. Codes stay out of clipboard history.
-- QR images are never written to disk. `grim` pipes into `zbar`, the camera is
-  decoded inside the helper. There is no camera preview.
+- Screen capture is piped to ZBar. For the embedded camera preview, Qt writes
+  short-lived frames to a private memory-backed `/dev/shm` directory for
+  ZXing-C++ to decode. Frames and the directory are removed after scanning.
+  The command-line camera scan uses ZBar.
 - Children carry `PR_SET_PDEATHSIG`. A killed helper releases the camera.
 - Deleting an account deletes `vault.gpg.previous` with it.
 
