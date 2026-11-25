@@ -26,6 +26,10 @@ omarchy plugin add https://github.com/yogeshojha/omafob.git --enable
 sudo pacman -S --needed gnupg wl-clipboard zbar grim slurp qt6-multimedia zxing-cpp
 ```
 
+The widget requires Qt Multimedia to load. Its camera scanner uses the
+`ZXingReader` executable from `zxing-cpp` (tested with version 3.1.1);
+screen capture and the command-line camera scanner use ZBar.
+
 Keybind, in `~/.config/hypr/bindings.conf`:
 
 ```

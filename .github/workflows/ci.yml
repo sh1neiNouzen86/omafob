@@ -58,3 +58,19 @@ jobs:
       - name: Security properties
         if: always()
         run: python3 test/test_security.py
+
+  camera-decoding:
+    name: camera decoding (Arch Linux)
+    runs-on: ubuntu-latest
+    container: archlinux:base
+    steps:
+      - name: Install test dependencies
+        run: pacman -Syu --noconfirm --needed git python qrencode zxing-cpp
+
+      - uses: actions/checkout@v5
+
+      - name: Decode a QR frame
+        run: |
+          command -v ZXingReader
+          command -v qrencode
+          python -m unittest discover -s test -p test_camera_frames.py -v

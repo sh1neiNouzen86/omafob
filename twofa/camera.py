@@ -165,7 +165,7 @@ class FrameScanner:
     def start(self):
         if not shutil.which("ZXingReader"):
             self._directory.cleanup()
-            raise CameraError("ZXingReader is not installed")
+            raise CameraError("ZXingReader is not installed; install the zxing-cpp package")
         threading.Thread(target=self._run, daemon=True).start()
 
     def submit(self, name):
